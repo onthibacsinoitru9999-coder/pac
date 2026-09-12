@@ -1,0 +1,554 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bach Mai Web PACS Viewer (Cornerstone.js)</title>
+    
+    <!-- Medical DICOM Libraries (Cornerstone Ecosystem) -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cornerstone-core@2.6.1/dist/cornerstone.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cornerstone-math@0.1.10/dist/cornerstoneMath.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cornerstone-tools@6.0.8/dist/cornerstoneTools.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoader.bundle.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0b0d10;
+            --panel-bg: #14181f;
+            --accent-color: #00e5ff;
+            --text-color: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border-color: #242c38;
+            --btn-active: #00bcd4;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        header {
+            height: 48px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+            z-index: 10;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+            margin-right: 12px;
+        }
+        .brand span { color: var(--accent-color); }
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        button, label.btn {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+        button:hover, label.btn:hover {
+            background: rgba(0, 229, 255, 0.12);
+            border-color: var(--accent-color);
+            color: #fff;
+        }
+        button.active {
+            background: var(--btn-active);
+            color: #000;
+            font-weight: 700;
+            border-color: var(--btn-active);
+        }
+        .divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-color);
+            margin: 0 4px;
+        }
+        main {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+        #viewportWrapper {
+            flex: 1;
+            position: relative;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #dicomImage {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .hud {
+            position: absolute;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            color: var(--accent-color);
+            text-shadow: 1px 1px 2px #000, -1px -1px 2px #000;
+            pointer-events: none;
+            line-height: 1.4;
+            z-index: 5;
+        }
+        .hud-tl { top: 10px; left: 12px; }
+        .hud-tr { top: 10px; right: 12px; text-align: right; }
+        .hud-bl { bottom: 10px; left: 12px; }
+        .hud-br { bottom: 10px; right: 12px; text-align: right; }
+        #mobileControls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 15;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(20, 24, 31, 0.9);
+            border: 1px solid var(--border-color);
+            border-radius: 30px;
+            padding: 4px 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+        }
+        #mobileControls button {
+            background: transparent;
+            border: none;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 20px;
+        }
+        #mobileSliceText {
+            font-family: monospace;
+            font-weight: bold;
+            color: var(--accent-color);
+            font-size: 13px;
+            min-width: 60px;
+            text-align: center;
+        }
+        #loadingOverlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(11, 13, 16, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            z-index: 30;
+        }
+        #loadingOverlay.hidden { display: none; }
+        .spinner {
+            width: 42px;
+            height: 42px;
+            border: 4px solid #222;
+            border-top: 4px solid var(--accent-color);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        #dropzone {
+            position: absolute;
+            inset: 0;
+            background: rgba(11, 13, 16, 0.94);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            z-index: 20;
+            margin: 20px;
+            border: 2px dashed #334155;
+            border-radius: 12px;
+            text-align: center;
+            padding: 24px;
+        }
+        #dropzone.hidden { display: none; }
+        #dropzone h2 { font-size: 20px; color: #fff; }
+        #dropzone p { color: var(--text-muted); font-size: 14px; max-width: 480px; }
+        @media (max-width: 768px) {
+            .brand { display: none; }
+            header { padding: 0 4px; }
+            button, label.btn { padding: 5px 8px; font-size: 11px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">🏥 <span>BẠCH MAI PACS</span></div>
+        <div class="toolbar-group">
+            <button id="btnWwwc" class="active" onclick="setTool('Wwwc')">☀️ Cửa sổ (W/L)</button>
+            <button id="btnPan" onclick="setTool('Pan')">✋ Kéo (Pan)</button>
+            <button id="btnZoom" onclick="setTool('Zoom')">🔍 Thu/Phóng</button>
+            <button id="btnLength" onclick="setTool('Length')">📏 Đo mm</button>
+            <button id="btnAngle" onclick="setTool('Angle')">📐 Đo góc</button>
+            <button id="btnCobb" onclick="setTool('CobbAngle')">🦴 Góc Cobb</button>
+        </div>
+        <div class="divider"></div>
+        <div class="toolbar-group">
+            <button onclick="setWwWc(2000, 450)">🦴 Xương</button>
+            <button onclick="setWwWc(400, 40)">🥩 Nhu mô</button>
+            <button onclick="setWwWc(350, 80)">🦴 Cột sống</button>
+            <button onclick="setWwWc(1500, -600)">🫁 Phổi</button>
+            <button onclick="setWwWc(80, 40)">🧠 Não</button>
+        </div>
+        <div class="divider"></div>
+        <div class="toolbar-group">
+            <button id="btnCine" onclick="toggleCine()">🎬 Play Cine</button>
+            <button onclick="toggleInvert()">🔄 Đảo màu</button>
+            <button onclick="resetViewport()">⚡ Mặc định</button>
+            <label class="btn" for="fileInput" style="border-color: var(--accent-color);">
+                📂 Mở file
+            </label>
+            <input type="file" id="fileInput" webkitdirectory directory multiple style="display:none;" onchange="handleLocalFiles(event)">
+        </div>
+    </header>
+
+    <main>
+        <div id="viewportWrapper">
+            <div id="dicomImage" oncontextmenu="return false;"></div>
+            <div class="hud hud-tl">
+                <div id="hudPatientName">BN: ĐANG TẢI...</div>
+                <div id="hudPatientId">Mã BN: ---</div>
+                <div id="hudPatientDetails">---</div>
+            </div>
+            <div class="hud hud-tr">
+                <div>BV BẠCH MAI - KHOA CTCH</div>
+                <div id="hudModality">MOD: ---</div>
+                <div id="hudStudyDate">Ngày: ---</div>
+            </div>
+            <div class="hud hud-bl">
+                <div id="hudSliceIndex">Lát cắt: 0 / 0</div>
+                <div id="hudThickness">Dày lát: --- mm</div>
+                <div id="hudFps" style="font-size: 10px; color:#64748b;">Cornerstone.js WebGL 60fps</div>
+            </div>
+            <div class="hud hud-br">
+                <div id="hudWl">W: --- L: ---</div>
+                <div id="hudZoom">Zoom: 100%</div>
+                <div id="hudActiveTool" style="color: #38bdf8;">Công cụ: Cửa sổ W/L</div>
+            </div>
+            <div id="mobileControls">
+                <button onclick="stepSlice(-1)">◀ Trước</button>
+                <span id="mobileSliceText">0 / 0</span>
+                <button onclick="stepSlice(1)">Sau ▶</button>
+            </div>
+            <div id="loadingOverlay">
+                <div class="spinner"></div>
+                <div id="loadingText" style="font-size: 14px; color: var(--accent-color); font-weight: 500;">
+                    Đang kết nối hệ thống PACS...
+                </div>
+            </div>
+            <div id="dropzone" class="hidden">
+                <h2>Trình Xem DICOM Trực Tuyến - BV Bạch Mai</h2>
+                <p>Không tìm thấy tham số ca chụp trong liên kết. Bác sĩ có thể kéo thả thư mục chứa ảnh DICOM vào đây hoặc mở file từ thiết bị.</p>
+                <button onclick="document.getElementById('fileInput').click()" style="padding: 10px 20px; font-size: 14px; background: var(--accent-color); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">
+                    📂 Chọn Thư Mục / File DICOM (.dcm)
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let imageIds = [];
+        let currentSliceIndex = 0;
+        let isCinePlaying = false;
+        let cineInterval = null;
+        const element = document.getElementById('dicomImage');
+
+        function initCornerstone() {
+            cornerstone.enable(element);
+            cornerstoneTools.external.cornerstone = cornerstone;
+            cornerstoneTools.external.cornerstoneMath = cornerstoneMath;
+            cornerstoneTools.external.Hammer = Hammer;
+            cornerstoneTools.init({ showQueryPath: true });
+
+            cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+            cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+            cornerstoneWADOImageLoader.configure({ beforeSend: function(xhr) {} });
+
+            const WwwcTool = cornerstoneTools.WwwcTool;
+            const PanTool = cornerstoneTools.PanTool;
+            const ZoomTool = cornerstoneTools.ZoomTool;
+            const LengthTool = cornerstoneTools.LengthTool;
+            const AngleTool = cornerstoneTools.AngleTool;
+            const CobbAngleTool = cornerstoneTools.CobbAngleTool;
+            const StackScrollMouseWheelTool = cornerstoneTools.StackScrollMouseWheelTool;
+            const PanMultiTouchTool = cornerstoneTools.PanMultiTouchTool;
+            const ZoomTouchPinchTool = cornerstoneTools.ZoomTouchPinchTool;
+
+            cornerstoneTools.addTool(WwwcTool);
+            cornerstoneTools.addTool(PanTool);
+            cornerstoneTools.addTool(ZoomTool);
+            cornerstoneTools.addTool(LengthTool);
+            cornerstoneTools.addTool(AngleTool);
+            cornerstoneTools.addTool(CobbAngleTool);
+            cornerstoneTools.addTool(StackScrollMouseWheelTool);
+            cornerstoneTools.addTool(PanMultiTouchTool);
+            cornerstoneTools.addTool(ZoomTouchPinchTool);
+
+            cornerstoneTools.setToolActive('Wwwc', { mouseButtonMask: 1 });
+            cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 2 });
+            cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 4 });
+            cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
+            cornerstoneTools.setToolActive('PanMultiTouch', {});
+            cornerstoneTools.setToolActive('ZoomTouchPinch', {});
+
+            element.addEventListener('cornerstoneimagerendered', onImageRendered);
+        }
+
+        const toolNames = ['Wwwc', 'Pan', 'Zoom', 'Length', 'Angle', 'CobbAngle'];
+        function setTool(toolName) {
+            toolNames.forEach(t => {
+                cornerstoneTools.setToolPassive(t);
+                const btn = document.getElementById('btn' + t);
+                if (btn) btn.classList.remove('active');
+            });
+            cornerstoneTools.setToolActive(toolName, { mouseButtonMask: 1 });
+            const activeBtn = document.getElementById('btn' + toolName);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            const toolLabels = {
+                'Wwwc': 'Cửa sổ W/L',
+                'Pan': 'Kéo di chuyển (Pan)',
+                'Zoom': 'Thu/Phóng (Zoom)',
+                'Length': 'Thước đo khoảng cách (mm)',
+                'Angle': 'Đo góc',
+                'CobbAngle': 'Đo góc Cobb vẹo cột sống'
+            };
+            document.getElementById('hudActiveTool').innerText = "Công cụ: " + (toolLabels[toolName] || toolName);
+        }
+
+        function setWwWc(ww, wc) {
+            const viewport = cornerstone.getViewport(element);
+            if (!viewport) return;
+            viewport.voi.windowWidth = ww;
+            viewport.voi.windowCenter = wc;
+            cornerstone.setViewport(element, viewport);
+        }
+
+        function toggleInvert() {
+            const viewport = cornerstone.getViewport(element);
+            if (!viewport) return;
+            viewport.invert = !viewport.invert;
+            cornerstone.setViewport(element, viewport);
+        }
+
+        function resetViewport() {
+            cornerstone.reset(element);
+        }
+
+        function stepSlice(direction) {
+            if (imageIds.length <= 1) return;
+            currentSliceIndex = (currentSliceIndex + direction + imageIds.length) % imageIds.length;
+            displaySlice(currentSliceIndex);
+        }
+
+        function displaySlice(index) {
+            if (!imageIds[index]) return;
+            cornerstone.loadAndCacheImage(imageIds[index]).then(image => {
+                const viewport = cornerstone.getViewport(element);
+                cornerstone.displayImage(element, image, viewport);
+                updateSliceHUD();
+            }).catch(err => {
+                console.warn("Lỗi load slice #" + index, err);
+            });
+        }
+
+        function updateSliceHUD() {
+            document.getElementById('hudSliceIndex').innerText = `Lát cắt: ${currentSliceIndex + 1} / ${imageIds.length}`;
+            document.getElementById('mobileSliceText').innerText = `${currentSliceIndex + 1} / ${imageIds.length}`;
+        }
+
+        function toggleCine() {
+            if (imageIds.length <= 1) return;
+            isCinePlaying = !isCinePlaying;
+            const btn = document.getElementById('btnCine');
+            if (isCinePlaying) {
+                btn.classList.add('active');
+                btn.innerText = "⏸ Dừng Cine";
+                cineInterval = setInterval(() => {
+                    stepSlice(1);
+                }, 100);
+            } else {
+                btn.classList.remove('active');
+                btn.innerText = "🎬 Play Cine";
+                clearInterval(cineInterval);
+            }
+        }
+
+        function onImageRendered(e) {
+            const eventData = e.detail;
+            const viewport = eventData.viewport;
+            const image = eventData.image;
+
+            if (viewport && viewport.voi) {
+                document.getElementById('hudWl').innerText = `W: ${Math.round(viewport.voi.windowWidth)} L: ${Math.round(viewport.voi.windowCenter)}`;
+                document.getElementById('hudZoom').innerText = `Zoom: ${Math.round(viewport.scale * 100)}%`;
+            }
+
+            if (image && image.data) {
+                try {
+                    const ds = image.data;
+                    const pName = ds.string('x00100010');
+                    if (pName) document.getElementById('hudPatientName').innerText = "BN: " + pName.replace(/\^/g, ' ').trim();
+                    const pId = ds.string('x00100020');
+                    if (pId) document.getElementById('hudPatientId').innerText = "Mã BN: " + pId.trim();
+                    const sDate = ds.string('x00080020');
+                    if (sDate) document.getElementById('hudStudyDate').innerText = "Ngày: " + sDate;
+                    const mod = ds.string('x00080060');
+                    if (mod) document.getElementById('hudModality').innerText = "MOD: " + mod;
+                    const thk = ds.string('x00180050');
+                    if (thk) document.getElementById('hudThickness').innerText = `Dày lát: ${parseFloat(thk).toFixed(1)} mm`;
+                } catch(e) {}
+            }
+        }
+
+        async function fetchStudyFromGitHub() {
+            const params = new URLSearchParams(window.location.search);
+            const rawId = params.get('id');
+            const explicitTag = params.get('tag');
+
+            if (!rawId && !explicitTag) {
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                document.getElementById('dropzone').classList.remove('hidden');
+                return;
+            }
+
+            const cleanId = (rawId || "").replace("VS.", "").trim();
+            const loadingText = document.getElementById('loadingText');
+            loadingText.innerText = `Đang tìm ca chụp bệnh nhân ${cleanId || explicitTag} trên GitHub...`;
+
+            try {
+                let targetTag = explicitTag;
+                const repoOwner = "onthibacsinoitru9999-coder";
+                const repoName = "pac";
+
+                if (!targetTag) {
+                    const relsResp = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/releases?per_page=30`);
+                    if (!relsResp.ok) throw new Error("Không thể kết nối GitHub Releases: " + relsResp.statusText);
+                    const releases = await relsResp.json();
+                    
+                    const matchedRel = releases.find(r => r.tag_name && r.tag_name.includes(cleanId));
+                    if (!matchedRel) {
+                        throw new Error(`Không tìm thấy Release nào cho mã bệnh nhân '${cleanId}' trên repo '${repoName}'.`);
+                    }
+                    targetTag = matchedRel.tag_name;
+                }
+
+                loadingText.innerText = `Đang nạp thông tin ca chụp (${targetTag})...`;
+
+                const manifestUrl = `https://github.com/${repoOwner}/${repoName}/releases/download/${targetTag}/manifest.json`;
+                const manifestResp = await fetch(manifestUrl);
+                if (!manifestResp.ok) throw new Error("Không tìm thấy manifest.json trên release " + targetTag);
+                const manifest = await manifestResp.json();
+
+                if (manifest.patientName) document.getElementById('hudPatientName').innerText = "BN: " + manifest.patientName;
+                if (manifest.patientId) document.getElementById('hudPatientId').innerText = "Mã BN: " + manifest.patientId;
+                if (manifest.modality) document.getElementById('hudModality').innerText = "MOD: " + manifest.modality;
+                if (manifest.studyDate) document.getElementById('hudStudyDate').innerText = "Ngày: " + manifest.studyDate;
+
+                imageIds = [];
+                const baseUrl = `https://github.com/${repoOwner}/${repoName}/releases/download/${targetTag}/`;
+                for (const slice of manifest.slices) {
+                    const sliceName = slice.replace(/\\/g, '/').split('/').pop();
+                    const dcmUrl = baseUrl + sliceName;
+                    imageIds.push("wadouri:" + dcmUrl);
+                }
+
+                if (imageIds.length === 0) throw new Error("Ca chụp không có lát cắt nào!");
+
+                loadingText.innerText = `Đang tải lát cắt đầu tiên (1 / ${imageIds.length})...`;
+
+                const stack = { currentImageIdIndex: 0, imageIds: imageIds };
+                cornerstoneTools.addStackStateManager(element, ['stack']);
+                cornerstoneTools.addToolState(element, 'stack', stack);
+
+                currentSliceIndex = 0;
+                const firstImage = await cornerstone.loadAndCacheImage(imageIds[0]);
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                cornerstone.displayImage(element, firstImage);
+                updateSliceHUD();
+
+                prefetchRemainingImages();
+
+            } catch (err) {
+                loadingText.innerHTML = `<span style="color:#ef4444;">⚠️ LỖI: ${err.message}</span><br><br><button onclick="location.reload()" style="background:#00e5ff; color:#000; padding:6px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Thử lại</button>`;
+            }
+        }
+
+        async function prefetchRemainingImages() {
+            for (let i = 1; i < imageIds.length; i++) {
+                try {
+                    await cornerstone.loadAndCacheImage(imageIds[i]);
+                } catch(e) {}
+            }
+        }
+
+        function handleLocalFiles(e) {
+            const files = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.dcm') || !f.name.includes('.'));
+            if (files.length === 0) {
+                alert("Không tìm thấy file DICOM (.dcm) trong thư mục!");
+                return;
+            }
+            loadFilesList(files);
+        }
+
+        function loadFilesList(fileList) {
+            document.getElementById('dropzone').classList.add('hidden');
+            document.getElementById('loadingOverlay').classList.remove('hidden');
+            document.getElementById('loadingText').innerText = `Đang nạp ${fileList.length} file DICOM...`;
+
+            imageIds = fileList.map(f => cornerstoneWADOImageLoader.wadouri.fileManager.add(f));
+            currentSliceIndex = 0;
+
+            const stack = { currentImageIdIndex: 0, imageIds: imageIds };
+            cornerstoneTools.addStackStateManager(element, ['stack']);
+            cornerstoneTools.addToolState(element, 'stack', stack);
+
+            cornerstone.loadAndCacheImage(imageIds[0]).then(img => {
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                cornerstone.displayImage(element, img);
+                updateSliceHUD();
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            cornerstone.resize(element);
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initCornerstone();
+            fetchStudyFromGitHub();
+        });
+    </script>
+</body>
+</html>
